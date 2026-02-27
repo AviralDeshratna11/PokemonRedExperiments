@@ -1,0 +1,68 @@
+[
+  {
+    "name": "has_starter",
+    "description": "Received starter Pokemon from Oak. Press F1 HERE.",
+    "filename": "has_starter.state",
+    "exists": false
+  },
+  {
+    "name": "delivered_parcel",
+    "description": "Delivered Oak's Parcel in Viridian City. Press F1 HERE.",
+    "filename": "delivered_parcel.state",
+    "exists": false
+  },
+  {
+    "name": "before_brock",
+    "description": "Party at roughly Lv10+, standing at Pewter Gym entrance. Press F1 HERE.",
+    "filename": "before_brock.state",
+    "exists": false
+  },
+  {
+    "name": "after_brock",
+    "description": "Just received Boulder Badge. Press F1 HERE.",
+    "filename": "after_brock.state",
+    "exists": false
+  },
+  {
+    "name": "mt_moon_entrance",
+    "description": "Entered Mt. Moon (first floor). Press F1 HERE.",
+    "filename": "mt_moon_entrance.state",
+    "exists": false
+  },
+  {
+    "name": "mt_moon_exit",
+    "description": "Exited Mt. Moon into Route 4. Press F1 HERE.",
+    "filename": "mt_moon_exit.state",
+    "exists": false
+  },
+  {
+    "name": "cerulean_entrance",
+    "description": "Arrived in Cerulean City. Press F1 HERE.",
+    "filename": "cerulean_entrance.state",
+    "exists": false
+  },
+  {
+    "name": "bills_quest_done",
+    "description": "Completed Bill's quest (received SS Ticket). Press F1 HERE.",
+    "filename": "bills_quest_done.state",
+    "exists": false
+  },
+  {
+    "name": "after_misty",
+    "description": "Just received Cascade Badge. Press F1 HERE.",
+    "filename": "after_misty.state",
+    "exists": false
+  },
+  {
+    "name": "vermilion_entrance",
+    "description": "Arrived in Vermilion City. Press F1 HERE.",
+    "filename": "vermilion_entrance.state",
+    "exists": false
+  },
+  {
+    "name": "after_surge",
+    "description": "Just received Thunder Badge. Press F1 HERE.",
+    "filename": "after_surge.state",
+    "exists": false
+  }
+]
