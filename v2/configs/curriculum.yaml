@@ -1,0 +1,70 @@
+# Curriculum RL configuration for CurriculumRedGymEnv + train_full_game_curriculum.py
+#
+# Loaded by curriculum.config.CurriculumConfig.from_file(). Any key omitted falls
+# back to the dataclass default. CLI flags in the training script override values
+# here (e.g. --num-envs, --mode, --speed, --target-milestone).
+#
+# YAML loading needs PyYAML (pip install pyyaml). A .json equivalent also works.
+
+# --- emulator / env ---
+gb_path: "../PokemonRed.gb"      # you must legally provide this ROM (not included)
+init_state: "../init.state"      # fresh-game start state shipped with the repo
+headless: true                   # true = no window (training); false = SDL2 window
+action_freq: 24                  # emulator ticks per agent action (1 overworld step)
+max_steps: 32768                 # 2048 * 16 step budget per episode
+save_video: false
+fast_video: true
+save_final_state: false
+print_rewards: false
+session_path: "runs_curriculum"
+emulation_speed: 0               # 0 = unlimited; used only when headless=false
+
+# --- observation ---
+use_structured_obs: true         # primary RAM/event structured vector
+use_screens: true                # keep pixel frame-stack as auxiliary input
+history_len: 8                   # recent action / map history length
+
+# --- curriculum / staging ---
+state_store_root: "curriculum_states"
+target_milestone: null           # set per-stage (or via --target-milestone)
+start_state_strategy: "random"   # random | latest | best
+save_success_states: true
+success_state_min_reward: 0.0
+end_on_target: false             # end episode the moment the target milestone is hit
+end_on_blackout: false
+
+# --- scripted helpers ---
+use_scripted_helpers: false
+auto_advance_dialogue: false
+dialogue_taps: 8
+
+# --- reward weights (curriculum.rewards.RewardConfig) ---
+reward:
+  # positive
+  w_milestone: 1.0     # multiplies each milestone's own reward value
+  w_new_map: 5.0
+  w_new_coord: 0.02
+  w_event: 4.0
+  w_badge: 25.0
+  w_level: 1.0
+  w_pokedex: 1.0
+  w_heal: 3.0
+  # penalties (positive magnitudes; applied negatively)
+  p_blackout: 25.0
+  p_stuck: 0.05
+  p_wall_bump: 0.02
+  p_menu_spam: 0.02
+  p_inactivity: 0.01
+  p_heal_farm: 0.5
+  p_loop: 0.1
+  # thresholds
+  stuck_visit_threshold: 400
+  inactivity_patience: 1500
+  loop_window: 200
+  loop_unique_min: 12
+  menu_window: 50
+  menu_spam_max: 12
+  heal_farm_patience: 2
+  level_explore_thresh: 22
+  level_scale_factor: 4.0
+  reward_scale: 1.0
