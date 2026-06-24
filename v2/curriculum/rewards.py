@@ -26,6 +26,9 @@ from typing import Deque, Dict, List, Set
 from curriculum.ram_map import GameState
 from curriculum.milestones import MilestoneManager
 from curriculum.structured_obs import EpisodeSignals
+from curriculum.intrinsic import build_novelty
+from curriculum.reward_controller import (
+    AdaptiveRewardController, AdaptiveRewardConfig)
 
 MOVEMENT_ACTIONS = {0, 1, 2, 3}   # down, left, right, up
 START_ACTION = 6
@@ -70,6 +73,22 @@ class RewardConfig:
 
     # global scaling (parallels base env's reward_scale)
     reward_scale: float = 1.0
+
+    # --- intrinsic motivation (non-saturating exploration) ---
+    intrinsic_kind: str = "count"         # none | count | rnd
+    w_intrinsic: float = 0.3              # bonus coefficient (coef at first visit)
+    intrinsic_power: float = 0.5          # decay exponent: 0.5 => 1/sqrt(N)
+    intrinsic_xy_bucket: int = 2          # tile coarseness for the count hash
+    intrinsic_event_bucket: int = 4       # story-flag chunk that refreshes novelty
+
+    # --- adaptive reward controller (homeostatic, anti-reward-hacking) ---
+    adaptive_enabled: bool = True
+    adaptive_ema: float = 0.999
+    adaptive_share_budget: float = 0.5    # a farmable term hogging > this share is throttled
+    adaptive_stall_patience: int = 1200   # steps of no real progress before throttling
+    adaptive_decay_rate: float = 0.999
+    adaptive_relax_rate: float = 1.0005
+    adaptive_floor: float = 0.05
 
 
 class AntiLoopTracker:
@@ -160,10 +179,32 @@ class RewardManager:
     def __init__(self, cfg: RewardConfig):
         self.cfg = cfg
         self.anti = AntiLoopTracker(cfg)
+        # non-saturating intrinsic motivation (None if disabled). RND needs an
+        # obs_fn (wired by the env); from here we can always build the count module.
+        self.novelty = build_novelty(
+            cfg.intrinsic_kind, coef=cfg.w_intrinsic,
+            power=cfg.intrinsic_power, xy_bucket=cfg.intrinsic_xy_bucket,
+            event_bucket=cfg.intrinsic_event_bucket,
+        ) if cfg.intrinsic_kind != "rnd" else None
+        # homeostatic controller over farmable component weights
+        self.controller = AdaptiveRewardController(AdaptiveRewardConfig(
+            enabled=cfg.adaptive_enabled, ema=cfg.adaptive_ema,
+            share_budget=cfg.adaptive_share_budget,
+            stall_patience=cfg.adaptive_stall_patience,
+            decay_rate=cfg.adaptive_decay_rate, relax_rate=cfg.adaptive_relax_rate,
+            floor=cfg.adaptive_floor,
+        ))
         self.reset()
+
+    def attach_novelty(self, novelty) -> None:
+        """Inject an externally-built novelty module (e.g. RND needing an obs_fn)."""
+        self.novelty = novelty
 
     def reset(self) -> None:
         self.anti.reset()
+        if self.novelty is not None:
+            self.novelty.reset()
+        self.controller.reset()
         self.seen_coords: Set[str] = set()
         self.seen_maps: Set[int] = set()
         self.max_event_sum = 0
@@ -216,6 +257,10 @@ class RewardManager:
         cfg = self.cfg
         comp: Dict[str, float] = {}
         progressed = False
+        # "real" progress = an objective event (milestone/map/event/badge). This is
+        # stricter than ``progressed`` (which also counts level/pokedex) and is what
+        # the adaptive controller uses to decide that the agent has *stalled*.
+        real_progress = False
 
         sig = self.anti.update(gs, action)
         x, y, m = gs.position()
@@ -226,12 +271,18 @@ class RewardManager:
             ms = mm.by_key[key]
             self._accumulate(comp, "milestone", cfg.w_milestone * ms.reward)
             progressed = True
+            real_progress = True
 
         # --- new map ---
         if m not in self.seen_maps:
             self.seen_maps.add(m)
             self._accumulate(comp, "new_map", cfg.w_new_map)
             progressed = True
+            real_progress = True
+
+        # --- intrinsic novelty (non-saturating curiosity) ---
+        if self.novelty is not None:
+            self._accumulate(comp, "intrinsic", self.novelty.bonus(gs))
 
         # --- new coordinate (exploration breadcrumb) ---
         if not gs.in_battle() and coord not in self.seen_coords:
@@ -245,6 +296,7 @@ class RewardManager:
             self.max_event_sum = event_sum
             self._accumulate(comp, "event", cfg.w_event * gained)
             progressed = True
+            real_progress = True
 
         # --- badges (max-based) ---
         badge_count = gs.badge_count()
@@ -253,6 +305,7 @@ class RewardManager:
             self.badges_awarded = badge_count
             self._accumulate(comp, "badge", cfg.w_badge * gained)
             progressed = True
+            real_progress = True
 
         # --- level growth (max-based, diminishing returns) ---
         lvl = self._level_metric(gs)
@@ -286,6 +339,11 @@ class RewardManager:
         # progress bookkeeping (resets inactivity / heal-farm windows)
         if progressed:
             self.anti.note_progress()
+
+        # --- homeostatic adaptation: throttle any farmable term that is running
+        #     away while real progress has stalled (anti-reward-hacking). Protected
+        #     objective terms (milestone/badge/event/new_map) are never touched. ---
+        comp = self.controller.adjust(comp, real_progress)
 
         # cache signals for the observation builder + logging
         self.last_signals = {
@@ -349,3 +407,10 @@ class RewardManager:
 
     def scaled_total(self, comp: Dict[str, float]) -> float:
         return self.cfg.reward_scale * sum(comp.values())
+
+    def adaptive_stats(self) -> Dict[str, float]:
+        """Adaptive-controller multipliers + intrinsic stats for TensorBoard."""
+        out = dict(self.controller.tb_stats())
+        if self.novelty is not None:
+            out.update(self.novelty.stats())
+        return out

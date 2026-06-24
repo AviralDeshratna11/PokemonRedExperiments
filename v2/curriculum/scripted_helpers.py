@@ -25,7 +25,20 @@ from __future__ import annotations
 
 from pyboy.utils import WindowEvent
 
-from curriculum.ram_map import GameState
+from curriculum.ram_map import (
+    GameState, MOVE_CUT, MOVE_SURF, MOVE_STRENGTH, MOVE_FLY, MOVE_FLASH,
+    ITEM_POKE_FLUTE,
+)
+
+# Gen-1 move ids that appear in a party Pokemon's overworld field-move submenu. Used
+# to compute the cursor offset of a target field move (how many field moves precede it
+# in the mon's move slots), so the macro selects the right one regardless of moveset.
+FIELD_MOVE_IDS = {
+    MOVE_CUT, MOVE_FLY, MOVE_SURF, MOVE_STRENGTH, MOVE_FLASH,
+    0x5B,  # DIG
+    0x64,  # TELEPORT
+    0x87,  # SOFTBOILED
+}
 
 # name -> (press_event, release_event)
 BUTTONS = {
@@ -133,3 +146,130 @@ class ScriptedHelpers:
         self.tap("a")
         self.tap("a")
         self.mash_a(dialogue_taps)
+
+    # ----- field-move: Cut --------------------------------------------------- #
+    def field_use_cut(self, dialogue_taps: int = 10) -> bool:
+        """Best-effort: open the menu, pick the mon that knows Cut, and use Cut.
+
+        This is the deterministic handling for the single biggest wall just past the
+        SS Anne: PPO rarely discovers the multi-step field-move menu sequence on its
+        own. We read which party slot knows Cut from RAM so the cursor navigation is
+        correct regardless of party order.
+
+        Gen-1 menu path performed:
+          START -> (cursor to top) -> POKEMON -> down*slot -> A ->
+          (field-move submenu) CUT -> A -> mash A through the cut animation/text.
+
+        Returns False (no-op) when no party member knows Cut. The sequence is
+        otherwise self-cancelling if the tile in front is not cuttable (a stray menu
+        open/close), so it is safe to call opportunistically. Marked EXPERIMENTAL:
+        validate the submenu cursor offset against your ROM before relying on it.
+        """
+        slot = self.gs.mon_index_with_move(MOVE_CUT)
+        if slot < 0:
+            return False
+
+        # make sure no menu/text is mid-animation, then open a fresh menu
+        self.tap("b")
+        self.tap("start")
+        # the start menu remembers its last cursor row; push to the very top, then
+        # step down to POKEMON. Menu order: POKEDEX(0), POKEMON(1), ITEM, ...
+        for _ in range(6):
+            self.tap("up")
+        self.tap("down")        # POKEDEX -> POKEMON
+        self.tap("a")           # open party
+        # select the mon that knows Cut
+        for _ in range(slot):
+            self.tap("down")
+        self.tap("a")           # open that mon's action menu
+        # the field-move submenu lists usable HM moves at the top; CUT is the only
+        # field move most early-game Cut mons have, so it is the top entry.
+        self.tap("a")           # choose CUT
+        self.mash_a(dialogue_taps)  # flush "used CUT!" text / animation
+        return True
+
+    # ----- field-move: generalized (Surf / Strength / Cut / ...) ------------- #
+    def field_use_move(self, move_id: int, dialogue_taps: int = 10) -> bool:
+        """Best-effort: open the menu, pick the party mon that knows ``move_id`` and
+        use that field move on the tile the player faces.
+
+        Unlike :meth:`field_use_cut` (which assumes the field move is the top submenu
+        entry), this reads the mon's moveset from RAM and computes the **cursor offset**
+        of the target move among the field-usable moves that precede it, so it selects
+        the correct entry even when the mon knows several HMs (e.g. a Lapras with both
+        Surf and Strength). Returns False when no party member knows the move.
+
+        Gen-1 path: START -> POKEMON -> down*slot -> A -> (field-move submenu) down*offset
+        -> A -> mash A through the animation/text. Marked EXPERIMENTAL: validate the
+        submenu cursor offsets against your ROM before relying on it for training.
+        """
+        slot = self.gs.mon_index_with_move(move_id)
+        if slot < 0:
+            return False
+        # cursor offset = number of field-usable moves in earlier move slots
+        moves = self.gs.mon_moves(slot)
+        offset = 0
+        for mv in moves:
+            if mv == move_id:
+                break
+            if mv in FIELD_MOVE_IDS:
+                offset += 1
+
+        self.tap("b")
+        self.tap("start")
+        for _ in range(6):       # force cursor to the top of the start menu
+            self.tap("up")
+        self.tap("down")         # POKEDEX -> POKEMON
+        self.tap("a")            # open party
+        for _ in range(slot):    # select the mon that knows the move
+            self.tap("down")
+        self.tap("a")            # open that mon's field-move submenu
+        for _ in range(offset):  # move to the target field move
+            self.tap("down")
+        self.tap("a")            # choose it
+        self.mash_a(dialogue_taps)
+        return True
+
+    def field_use_surf(self, dialogue_taps: int = 10) -> bool:
+        """Use Surf in the field (must be facing water with Surf usable)."""
+        return self.field_use_move(MOVE_SURF, dialogue_taps)
+
+    def field_use_strength(self, dialogue_taps: int = 12) -> bool:
+        """Activate Strength (must be facing/near a boulder with Strength usable).
+
+        Strength toggles a 'can push boulders' state for the area; after activation the
+        player pushes boulders by simply walking into them. Calling this once when the
+        agent is stuck against a boulder is the deterministic handling.
+        """
+        return self.field_use_move(MOVE_STRENGTH, dialogue_taps)
+
+    # ----- bag item: generalized (Poke Flute / ...) -------------------------- #
+    def use_item(self, item_id: int, dialogue_taps: int = 12) -> bool:
+        """Open the bag, find ``item_id`` by its current bag index, and USE it.
+
+        Reads the live bag order from RAM so the cursor lands on the right item even as
+        the bag contents change. Returns False when the item is not held. EXPERIMENTAL:
+        the START-menu ITEM offset assumes the Pokedex is owned (always true by the time
+        these key items matter). Validate against your ROM if used earlier.
+        """
+        items = self.gs.bag_items()
+        idx = next((i for i, (iid, _) in enumerate(items) if iid == item_id), -1)
+        if idx < 0:
+            return False
+        self.tap("b")
+        self.tap("start")
+        for _ in range(6):       # cursor to top
+            self.tap("up")
+        self.tap("down")         # POKEDEX -> POKEMON
+        self.tap("down")         # POKEMON -> ITEM
+        self.tap("a")            # open bag
+        for _ in range(idx):     # scroll to the item
+            self.tap("down")
+        self.tap("a")            # select item
+        self.tap("a")            # choose USE
+        self.mash_a(dialogue_taps)
+        return True
+
+    def use_poke_flute(self, dialogue_taps: int = 14) -> bool:
+        """Use the Poke Flute (wakes a Snorlax the player is facing)."""
+        return self.use_item(ITEM_POKE_FLUTE, dialogue_taps)

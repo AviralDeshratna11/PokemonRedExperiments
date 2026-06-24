@@ -24,6 +24,7 @@ import numpy as np
 from gymnasium import spaces
 
 from curriculum.ram_map import GameState
+from curriculum.subgoal import SKILL_VOCAB
 
 
 @dataclass
@@ -44,6 +45,12 @@ class EpisodeSignals:
     wall_bump_score: float = 0.0      # 0..1, high => repeatedly bumping walls
     inactivity_score: float = 0.0     # 0..1, high => no new progress for a while
     milestone_bits: List[int] = field(default_factory=list)   # completed flags
+    # --- high-level subgoal (from the planner) so the policy is subgoal-conditioned ---
+    subgoal_active: float = 0.0       # 1 if a planner subgoal is currently set
+    subgoal_target_map: int = 0       # target map id (0 if none)
+    subgoal_hops: float = 0.0         # 0..1 normalized map-hop distance to target
+    subgoal_skill_id: int = -1        # index into subgoal.SKILL_VOCAB (-1 = none)
+    advice_active: float = 0.0        # 1 if a field move (cut/surf/..) is advised AND usable now
 
 
 class StructuredObservationBuilder:
@@ -77,6 +84,9 @@ class StructuredObservationBuilder:
         d += 2                       # pokedex owned count, has_pokedex
         d += 6                       # heal/blackout/pokecenter/stuck/loop/inactivity
         d += 1                       # wall bump score
+        d += 3                       # subgoal: active, target_map, hops
+        d += 1                       # advice_active (field move advised + usable now)
+        d += len(SKILL_VOCAB)        # subgoal skill one-hot
         d += self.num_actions * self.history_len   # recent actions (one-hot history)
         d += self.history_len        # recent map ids (normalized history)
         d += self.num_milestones     # milestone completion bits
@@ -147,6 +157,16 @@ class StructuredObservationBuilder:
         f.append(float(np.clip(sig.loop_score, 0.0, 1.0)))
         f.append(float(np.clip(sig.inactivity_score, 0.0, 1.0)))
         f.append(float(np.clip(sig.wall_bump_score, 0.0, 1.0)))
+
+        # --- high-level subgoal (subgoal-conditioned policy) ---
+        f.append(float(np.clip(sig.subgoal_active, 0.0, 1.0)))
+        f.append(min(max(sig.subgoal_target_map, 0), 255) / 255.0)
+        f.append(float(np.clip(sig.subgoal_hops, 0.0, 1.0)))
+        f.append(float(np.clip(sig.advice_active, 0.0, 1.0)))
+        skill_oh = [0.0] * len(SKILL_VOCAB)
+        if 0 <= sig.subgoal_skill_id < len(SKILL_VOCAB):
+            skill_oh[sig.subgoal_skill_id] = 1.0
+        f.extend(skill_oh)
 
         # --- recent action history (one-hot per slot) ---
         actions = list(sig.recent_actions[:self.history_len])

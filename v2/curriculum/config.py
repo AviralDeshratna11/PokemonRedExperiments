@@ -55,10 +55,38 @@ class CurriculumConfig:
     end_on_target: bool = False               # end episode when target milestone done
     end_on_blackout: bool = False             # end episode on a blackout
 
+    # --- Go-Explore warm-restart (works without a target milestone too) ---
+    start_state_prob: float = 0.0             # P(restart from a saved frontier state)
+    frontier_window: int = 4                  # sample among the furthest N saved states
+
+    # --- efficiency ---
+    max_steps_without_progress: int = 0       # truncate stalled episodes (0 = off)
+
     # --- scripted helpers ---
     use_scripted_helpers: bool = False
     auto_advance_dialogue: bool = False
     dialogue_taps: int = 8
+    auto_use_cut: bool = False                # deterministic Cut when stuck (experimental)
+    cut_trigger_bumps: int = 6                # wall-bumps in a row before trying Cut
+
+    # --- high-level planner (the "think, then learn" layer) ---
+    use_planner: bool = False                 # master switch for planner + subgoal shaping
+    planner_kind: str = "rule"                # none | rule | ollama
+    planner_model: str = "nemotron-mini"      # ollama model id (when planner_kind=ollama)
+    planner_host: str = "http://localhost:11434"
+    planner_timeout: float = 20.0             # seconds before falling back to rules
+    replan_interval: int = 512                # steps between routine replans
+    replan_on_stuck: bool = True              # also replan when stuck/loop signals spike
+    planner_verbose: bool = True              # print a CLI panel on every genuine LLM decision
+    subgoal_shaping_weight: float = 1.0       # scale of potential-based subgoal shaping
+    subgoal_reach_bonus: float = 8.0          # one-time bonus for reaching the subgoal map
+
+    # --- advice controller: make the policy FOLLOW the planner's decisions ---
+    use_advice: bool = False                  # reward acting consistently with advised skill
+    advice_w_align: float = 0.02              # per-step nudge for following the advised skill
+    advice_trigger_bumps: int = 4             # bumps at an advised obstacle before macro fires
+    advice_success_bonus: float = 5.0         # one-time bonus when a field-move opens progress
+    advice_require_planner: bool = True       # only act on advice when a planner is active
 
     # --- reward weights (nested) ---
     reward: RewardConfig = field(default_factory=RewardConfig)
@@ -131,8 +159,30 @@ class CurriculumConfig:
             "success_state_min_reward": self.success_state_min_reward,
             "end_on_target": self.end_on_target,
             "end_on_blackout": self.end_on_blackout,
+            "start_state_prob": self.start_state_prob,
+            "frontier_window": self.frontier_window,
+            "max_steps_without_progress": self.max_steps_without_progress,
             "use_scripted_helpers": self.use_scripted_helpers,
             "auto_advance_dialogue": self.auto_advance_dialogue,
             "dialogue_taps": self.dialogue_taps,
+            "auto_use_cut": self.auto_use_cut,
+            "cut_trigger_bumps": self.cut_trigger_bumps,
+            # planner / subgoal layer
+            "use_planner": self.use_planner,
+            "planner_kind": self.planner_kind,
+            "planner_model": self.planner_model,
+            "planner_host": self.planner_host,
+            "planner_timeout": self.planner_timeout,
+            "replan_interval": self.replan_interval,
+            "replan_on_stuck": self.replan_on_stuck,
+            "planner_verbose": self.planner_verbose,
+            "subgoal_shaping_weight": self.subgoal_shaping_weight,
+            "subgoal_reach_bonus": self.subgoal_reach_bonus,
+            # advice controller
+            "use_advice": self.use_advice,
+            "advice_w_align": self.advice_w_align,
+            "advice_trigger_bumps": self.advice_trigger_bumps,
+            "advice_success_bonus": self.advice_success_bonus,
+            "advice_require_planner": self.advice_require_planner,
             "reward_config": self.reward,
         }

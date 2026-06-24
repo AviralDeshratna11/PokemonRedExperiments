@@ -13,6 +13,140 @@ Nothing here includes or downloads a ROM. You must legally provide
 
 ---
 
+## 0. Quick start — train past SS Anne / toward the full game
+
+Everything runs from inside `v2/`. The recommended path to get **past the SS Anne
+checkpoint** (and keep going toward the Champion) is the staged curriculum: it
+warm-starts each milestone from the saved success-states of the previous one, so the
+agent doesn't have to re-discover the whole early game every episode.
+
+```bash
+cd PokemonRedExperiments/v2
+
+# Whole-game shared policy (simplest; good baseline, auto-resumes by default):
+python train_full_game_curriculum.py --mode headless --num-envs 16
+
+# Staged curriculum up to and beyond SS Anne (Vermilion + HM01 Cut):
+python train_full_game_curriculum.py --staged --num-envs 16 \
+    --milestones start_game,get_starter,first_rival_battle,deliver_parcel,get_pokedex,\
+reach_viridian_forest,exit_viridian_forest,reach_pewter,beat_brock,reach_mt_moon,\
+exit_mt_moon,reach_cerulean,beat_misty,help_bill,reach_vermilion,get_cut,beat_lt_surge
+
+# Full game, all 33 milestones, staged:
+python train_full_game_curriculum.py --staged --num-envs 16
+
+# Watch a single agent in a window:
+python train_full_game_curriculum.py --mode visual --speed 3
+```
+
+Tune `--num-envs` to your CPU core count (more envs = faster learning). Reaching SS
+Anne / Vermilion typically needs tens of millions of timesteps; the Champion needs
+far more. Leave it running — it checkpoints and resumes automatically (below).
+
+### Significant-checkpoint display
+
+While training, every significant checkpoint prints a **live banner** the first time
+the fleet reaches it, tiered by importance:
+
+```
+========================================================================
+>>>   MAJOR CHECKPOINT REACHED:  BEAT BROCK (BOULDER BADGE)
+     first reach at training step 1,284,096 (env 7, episode step 5031)
+     badges=1  party_levels_sum=34  progress=9/33
+========================================================================
+```
+
+- `*** LEGENDARY` — Elite Four, Champion
+- `>>> MAJOR`     — gym badges, major dungeons (Rocket Hideout, Silph Co., ...)
+- `[+] KEY`       — key items / Pokédex / **SS Ticket**
+- ` ->  step`     — reaching a new town/route
+
+Periodic summaries print the furthest milestone, badge/level bests, and the next few
+objectives. Two durable files are written into the session dir:
+
+- `progress.json`        — live dashboard: furthest milestone, % complete, best
+  badges/levels, per-milestone first-reach step and reach counts.
+- `milestones_log.jsonl` — append-only history of **every** checkpoint reach
+  (timestep, env, badges, levels) — survives restarts.
+
+(Markers are ASCII on purpose so they never crash the Windows console.)
+
+### Save & resume — never lose progress
+
+Training **auto-resumes by default** (`--resume auto`). If a run stops (crash, power
+loss, Ctrl-C) just re-run the *same command* and it continues:
+
+- It finds the newest `poke_<stage>_<steps>_steps.zip` in the session dir and loads
+  it, preserving the global timestep counter (checkpoint numbering stays continuous).
+- Checkpoints are written every `--save-freq` timesteps (default 200k).
+- In `--staged` mode, finished stages are recorded in `stage_progress.json` and
+  **skipped** on the next run; the next stage warm-starts from the last completed
+  stage's model. An interrupted stage resumes from *its own* latest checkpoint.
+- Successful emulator snapshots per milestone are saved under `curriculum_states/`
+  for warm-starting later stages.
+
+Force a fresh start with `--resume ""`, or resume an explicit file with
+`--resume runs_curriculum/poke_fullgame_4000000_steps`.
+
+The legacy `baseline_fast_v2.py` also auto-resumes now: it picks up the newest
+`poke_*_steps.zip` in `runs/` and continues with a continuous step counter.
+
+---
+
+## 0b. Getting *past* the baseline wall (SS Anne) — robustness & efficiency
+
+The stock baseline reliably stalls around the SS Anne because (1) every episode
+restarts in Pallet Town, so almost none of the training experience lands near the
+frontier, and (2) progress there is gated behind precise menu/field-move sequences
+that exploration rewards don't shape. These features attack both directly:
+
+**Go-Explore warm-restart (`start_state_prob`, default 0.5).**
+Even without `--staged`, each episode now has a configurable chance to restart from a
+saved *frontier* success-state (the furthest milestones that have snapshots), instead
+of always from `init.state`. As the agent reaches deeper milestones, more of its
+rollout is spent *at the wall* rather than re-walking the early game — the single
+biggest lever for crossing a far-from-start checkpoint. It is safe from a cold start
+(falls back to `init.state` until any snapshots exist) and reward accounting is
+re-anchored on the warm state so pre-earned progress isn't re-paid. `frontier_window`
+controls how many of the furthest states are sampled from.
+
+**Stalled-episode truncation (`max_steps_without_progress`, default 4000).**
+Episodes that go this many steps with no new map/event/badge/level are truncated, so
+PPO stops burning rollout on a dead state. Paired with Go-Explore restart, the freed
+samples get re-seeded near the frontier.
+
+**Deterministic Cut assist (`auto_use_cut`, default OFF — experimental).**
+The classic hard wall just past the SS Anne is *using HM01 Cut on the blocking tree*:
+a multi-step field-move menu sequence PPO rarely discovers. With `auto_use_cut: true`,
+after the agent bumps a wall `cut_trigger_bumps` times in a row while Cut is actually
+usable (a party member knows Cut **and** the Cascade Badge is owned — checked from
+RAM), the env executes a deterministic Cut macro (`ScriptedHelpers.field_use_cut`,
+which reads which party slot knows Cut so the cursor navigation is correct). It is a
+safe no-op when Cut isn't usable. **Marked experimental:** the party field-move submenu
+cursor offset is ROM/party-dependent — validate it (e.g. in `--mode visual`) before
+relying on it. This is the lever that turns "probably crosses, with risk" into "yes".
+
+**Training stability.** The PPO trainer now uses a linearly-decayed learning rate and
+clip range (`--lr`, plus `--ent-coef` to dial exploration), `vf_coef=0.5`,
+`max_grad_norm=0.5` — steadier behaviour over the long runs mid-game progress needs.
+
+Recommended command to push past SS Anne (Go-Explore on via the config defaults):
+
+```bash
+# whole-game run; Go-Explore + stalled-truncation come from configs/curriculum.yaml
+python train_full_game_curriculum.py --mode headless --num-envs 16
+
+# or the focused, fastest route: staged through the SS-Anne region, then enable the
+# Cut assist for the tree (edit configs/curriculum.yaml: auto_use_cut: true)
+python train_full_game_curriculum.py --staged --num-envs 16 \
+    --milestones help_bill,reach_vermilion,get_cut,beat_lt_surge
+```
+
+New RAM accessors backing this: `GameState.party_knows_move`, `mon_index_with_move`,
+`can_use_cut` ([ram_map.py](curriculum/ram_map.py)).
+
+---
+
 ## 1. Why this exists
 
 Pokémon Red is a long-horizon, sparse-reward game with brutal credit assignment. A

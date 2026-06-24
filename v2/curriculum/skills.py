@@ -163,3 +163,37 @@ class HighLevelController:
             self.active_name = desired
             self.active.on_start(gs)
         return self.active.act(observation, gs)
+
+
+class PlannerManager(HighLevelController):
+    """A manager whose skill choice is driven by the high-level planner's subgoal.
+
+    This is the explicit "manager selects a specialist agent" layer (the hierarchical
+    / multi-policy control the project is reaching for). It maps the planner's
+    ``subgoal.skill`` to a registered specialist option (a :class:`PolicySkill` loaded
+    from a trained model, or a :class:`ScriptedSkill`). Until a specialist is
+    registered for the requested skill, ``step`` returns ``None`` and the base
+    subgoal-conditioned PPO policy stays in control -- so this composes with, rather
+    than replaces, the single-policy trainer.
+
+    The env already feeds the chosen skill + target into the observation, so the PPO
+    policy is *subgoal-conditioned* even when no specialist overrides it; registering
+    specialists here lets you hand specific situations (e.g. battles) to dedicated
+    models without retraining the whole stack.
+    """
+
+    def __init__(self, registry: SkillRegistry):
+        super().__init__(registry)
+        self._subgoal_skill: Optional[str] = None
+
+    def set_subgoal_skill(self, skill_name: Optional[str]) -> None:
+        self._subgoal_skill = skill_name
+
+    def select(self, gs: GameState) -> Optional[str]:
+        names = set(self.registry.names())
+        # battles always go to the battle specialist if one exists (safety override)
+        if gs.in_battle() and "battle" in names:
+            return "battle"
+        if self._subgoal_skill in names:
+            return self._subgoal_skill
+        return super().select(gs)

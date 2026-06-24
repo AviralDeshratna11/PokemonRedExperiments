@@ -38,11 +38,21 @@ ADDR_PREV_MAP = 0xD35F       # previous map id (last map left)
 # Party                                                                        #
 # --------------------------------------------------------------------------- #
 ADDR_PARTY_COUNT = 0xD163
+PARTY_STRUCT_SIZE = 0x2C      # 44 bytes per party-mon struct
 PARTY_SPECIES_ADDRS = [0xD164, 0xD165, 0xD166, 0xD167, 0xD168, 0xD169]
 PARTY_LEVEL_ADDRS = [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]
 PARTY_HP_ADDRS = [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]       # 2 bytes each
 PARTY_MAXHP_ADDRS = [0xD18D, 0xD1B9, 0xD1E5, 0xD211, 0xD23D, 0xD269]    # 2 bytes each
 PARTY_STATUS_ADDRS = [0xD16F, 0xD19B, 0xD1C7, 0xD1F3, 0xD21F, 0xD24B]   # 1 byte each
+# Each mon's 4 move ids start here (mon i at PARTY_MOVES_BASE + i*PARTY_STRUCT_SIZE).
+PARTY_MOVES_BASE = 0xD173
+
+# Field-move ids used to detect whether a party member can use an HM in the overworld.
+MOVE_CUT = 0x0F
+MOVE_SURF = 0x39
+MOVE_STRENGTH = 0x46
+MOVE_FLY = 0x13
+MOVE_FLASH = 0x94
 
 # --------------------------------------------------------------------------- #
 # Badges / events                                                              #
@@ -83,6 +93,8 @@ ITEM_OAKS_PARCEL = 0x46
 ITEM_BICYCLE = 0x06
 ITEM_SS_TICKET = 0x3F
 ITEM_TOWN_MAP = 0x05
+ITEM_SILPH_SCOPE = 0x48
+ITEM_POKE_FLUTE = 0x49
 # HM item ids (HM01..HM05 -> CUT, FLY, SURF, STRENGTH, FLASH)
 HM_ITEM_IDS = {0xC4: "HM01_CUT", 0xC5: "HM02_FLY", 0xC6: "HM03_SURF",
                0xC7: "HM04_STRENGTH", 0xC8: "HM05_FLASH"}
@@ -185,6 +197,21 @@ class GameState:
     def party_levels_sum(self) -> int:
         return sum(self.party_levels())
 
+    def mon_moves(self, slot: int) -> List[int]:
+        """The 4 move ids of party member ``slot`` (0-based)."""
+        base = PARTY_MOVES_BASE + slot * PARTY_STRUCT_SIZE
+        return [self.read(base + j) for j in range(4)]
+
+    def mon_index_with_move(self, move_id: int) -> int:
+        """Return the first party slot whose mon knows ``move_id``, or -1."""
+        for i in range(min(self.party_count(), 6)):
+            if move_id in self.mon_moves(i):
+                return i
+        return -1
+
+    def party_knows_move(self, move_id: int) -> bool:
+        return self.mon_index_with_move(move_id) >= 0
+
     def party_hp_fractions(self) -> List[float]:
         return [m.hp_fraction for m in self.party_mons()]
 
@@ -281,11 +308,29 @@ class GameState:
     def has_cut(self) -> bool:
         return 0xC4 in self.bag_item_ids()  # HM01
 
+    def can_use_cut(self) -> bool:
+        """True when Cut is actually usable in the field: a party member knows Cut
+        and the Cascade Badge (badge bit 1) -- required to use it -- is owned."""
+        return self.has_badge(1) and self.party_knows_move(MOVE_CUT)
+
     def has_surf(self) -> bool:
         return 0xC6 in self.bag_item_ids()  # HM03
 
+    def can_use_surf(self) -> bool:
+        """True when Surf is usable in the field: a party member knows Surf and the
+        Soul Badge (badge bit 4), required to use it, is owned."""
+        return self.has_badge(4) and self.party_knows_move(MOVE_SURF)
+
     def has_strength(self) -> bool:
         return 0xC7 in self.bag_item_ids()  # HM04
+
+    def can_use_strength(self) -> bool:
+        """True when Strength is usable in the field: a party member knows Strength and
+        the Rainbow Badge (badge bit 3), required to use it, is owned."""
+        return self.has_badge(3) and self.party_knows_move(MOVE_STRENGTH)
+
+    def has_poke_flute(self) -> bool:
+        return ITEM_POKE_FLUTE in self.bag_item_ids()
 
     def pokedex_owned_count(self) -> int:
         return sum(bin(self.read(a)).count("1")

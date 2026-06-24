@@ -109,7 +109,7 @@ def build_default_milestones() -> List[Milestone]:
     M = Milestone
     milestones = [
         M("start_game", "Start Game",
-          _any(_event(0xD747, 0), _party_at_least(0)),  # Followed Oak Into Lab
+          _event(0xD747, 0),  # Followed Oak Into Lab (real event, not a no-op)
           reward=10.0, timeout_steps=2048 * 4, save_state=True),
 
         M("get_starter", "Get Starter Pokemon",

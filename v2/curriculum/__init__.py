@@ -37,6 +37,11 @@ from curriculum.milestones import Milestone, MilestoneManager, build_default_mil
 from curriculum.rewards import RewardConfig, RewardManager
 from curriculum.structured_obs import StructuredObservationBuilder
 from curriculum.state_store import StateStore
+from curriculum.intrinsic import build_novelty, HashCountNovelty
+from curriculum.reward_controller import AdaptiveRewardController, AdaptiveRewardConfig
+from curriculum.subgoal import Subgoal, SubgoalShaper, SKILL_VOCAB
+from curriculum.llm_planner import build_planner, RuleBasedPlanner, OllamaPlanner
+from curriculum.skill_bridge import AdviceController, AdviceConfig
 
 __all__ = [
     "GameState",
@@ -47,4 +52,16 @@ __all__ = [
     "RewardManager",
     "StructuredObservationBuilder",
     "StateStore",
+    "build_novelty",
+    "HashCountNovelty",
+    "AdaptiveRewardController",
+    "AdaptiveRewardConfig",
+    "Subgoal",
+    "SubgoalShaper",
+    "SKILL_VOCAB",
+    "build_planner",
+    "RuleBasedPlanner",
+    "OllamaPlanner",
+    "AdviceController",
+    "AdviceConfig",
 ]

@@ -23,6 +23,7 @@ contains, or distributes copyrighted game data.
 
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from pathlib import Path
@@ -60,8 +61,16 @@ class StateStore:
         d.mkdir(parents=True, exist_ok=True)
         uid = uuid.uuid4().hex[:8]
         fname = d / f"{milestone_key}_r{reward:.1f}_{uid}.state"
-        with open(fname, "wb") as f:
+        # Write to a temp name first, then atomically rename. With many SubprocVecEnv
+        # workers writing while others read for Go-Explore warm-starts, a reader must
+        # never observe a half-written ".state" (that would crash load_state and
+        # deadlock the vec env). ".tmp" files are not matched by the "*.state" glob.
+        tmp = d / f".{milestone_key}_{uid}.state.tmp"
+        with open(tmp, "wb") as f:
             pyboy.save_state(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, fname)  # atomic on the same filesystem
         self._prune(milestone_key)
         return fname
 

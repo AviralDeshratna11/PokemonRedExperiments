@@ -86,6 +86,17 @@ class CurriculumTensorboardCallback(BaseCallback):
             merged_flags = {k: v for d in list_of_flag_dicts for k, v in d.items()}
             self.logger.record("trajectory/all_flags", json.dumps(merged_flags))
 
+            # --- adaptive reward controller + intrinsic + subgoal (from env 0 info) ---
+            infos = self.locals.get("infos", [])
+            if infos:
+                adapt = infos[0].get("adaptive_stats", {}) or {}
+                for key, val in adapt.items():
+                    if isinstance(val, (int, float)):
+                        self.logger.record(f"adaptive/{key}", float(val))
+                tgt = infos[0].get("subgoal_target_map")
+                if tgt is not None:
+                    self.logger.record("planner/subgoal_target_map", float(tgt))
+
         return True
 
     def _on_training_end(self):
